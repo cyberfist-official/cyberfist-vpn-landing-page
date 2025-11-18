@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { google } from "googleapis";
+import { Resend } from "resend";
 
 const sheets = google.sheets("v4");
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function addToWaitlist(email: string, userAgent: string, source: string) {
   const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
@@ -36,6 +38,40 @@ async function addToWaitlist(email: string, userAgent: string, source: string) {
   });
 }
 
+async function sendNotificationEmail(email: string, userAgent: string, source: string) {
+  const to = process.env.WAITLIST_NOTIFY_TO;
+  const from = process.env.WAITLIST_NOTIFY_FROM || "CyberFist Waitlist <no-reply@example.com>";
+
+  if (!process.env.RESEND_API_KEY) {
+    console.error("[WAITLIST] RESEND_API_KEY not set, skipping notification email");
+    return;
+  }
+
+  if (!to) {
+    console.error("[WAITLIST] WAITLIST_NOTIFY_TO not set, skipping notification email");
+    return;
+  }
+
+  try {
+    await resend.emails.send({
+      from,
+      to,
+      subject: "New CyberFist waitlist signup",
+      text: [
+        "New waitlist signup",
+        "",
+        `Email: ${email}`,
+        `Source: ${source || "unknown"}`,
+        `User-Agent: ${userAgent || "unknown"}`,
+        `Time (ISO): ${new Date().toISOString()}`,
+      ].join("\n"),
+    });
+  } catch (err) {
+    console.error("[WAITLIST] Failed to send notification email:", err);
+    // Deliberately not throwing – signup should still succeed even if email fails.
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const { email } = await req.json();
@@ -58,7 +94,11 @@ export async function POST(req: Request) {
     const userAgent = req.headers.get("user-agent") || "unknown";
     const referer = req.headers.get("referer") || "direct";
 
+    // 1. Store in Google Sheets
     await addToWaitlist(email, userAgent, referer);
+
+    // 2. Fire notification email to you
+    await sendNotificationEmail(email, userAgent, referer);
 
     return NextResponse.json({ success: true });
   } catch (error) {
