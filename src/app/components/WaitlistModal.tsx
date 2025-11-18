@@ -1,29 +1,53 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, ReactNode } from "react";
 
 type WaitlistModalProps = {
-  children: React.ReactNode; // button label (e.g. "Join the Waitlist")
+  children: ReactNode; // button label (e.g. "Join the Waitlist")
 };
 
 export default function WaitlistModal({ children }: WaitlistModalProps) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
 
-    // TODO: hook this up to a real backend (ConvertKit, MailerLite, etc.)
-    console.log("Waitlist email:", email);
+    setIsSubmitting(true);
+    setError(null);
 
-    setSubmitted(true);
+    try {
+      const res = await fetch("/api/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Something went wrong. Please try again.");
+        return;
+      }
+
+      setSubmitted(true);
+      setEmail("");
+    } catch (err) {
+      console.error(err);
+      setError("Something went wrong. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   function closeModal() {
     setOpen(false);
     setSubmitted(false);
     setEmail("");
+    setError(null);
   }
 
   return (
@@ -67,11 +91,18 @@ export default function WaitlistModal({ children }: WaitlistModalProps) {
                   />
                 </label>
 
+                {error && (
+                  <p className="text-sm text-red-400">
+                    {error}
+                  </p>
+                )}
+
                 <button
                   type="submit"
-                  className="mt-2 inline-flex w-full items-center justify-center rounded-xl bg-accent-beige px-4 py-2.5 text-sm sm:text-base font-semibold text-dark-bg shadow-[0_18px_45px_rgba(0,0,0,0.55)] shadow-amber-900/30 transition hover:-translate-y-0.5 hover:shadow-[0_22px_55px_rgba(0,0,0,0.65)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-teal focus-visible:ring-offset-2 focus-visible:ring-offset-[#06181D]"
+                  disabled={isSubmitting}
+                  className="mt-2 inline-flex w-full items-center justify-center rounded-xl bg-accent-beige px-4 py-2.5 text-sm sm:text-base font-semibold text-dark-bg shadow-[0_18px_45px_rgba(0,0,0,0.55)] shadow-amber-900/30 transition hover:-translate-y-0.5 hover:shadow-[0_22px_55px_rgba(0,0,0,0.65)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-teal focus-visible:ring-offset-2 focus-visible:ring-offset-[#06181D] disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  Join the Waitlist
+                  {isSubmitting ? "Joining..." : "Join the Waitlist"}
                 </button>
               </form>
             )}
