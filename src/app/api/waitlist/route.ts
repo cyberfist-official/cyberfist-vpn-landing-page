@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { google } from "googleapis";
 import { Resend } from "resend";
+import { waitlistLimiter } from "@/lib/rateLimit";
 
 const sheets = google.sheets("v4");
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -81,7 +82,6 @@ async function sendNotificationEmail(
   }
 }
 
-// UPDATED: no source in the email body, and no `source` argument
 async function sendWelcomeEmail(email: string) {
   const from =
     process.env.WAITLIST_NOTIFY_FROM ||
@@ -143,6 +143,23 @@ function buildSourceWithTracking(
 
 export async function POST(req: Request) {
   try {
+    // --- Rate limiting per IP: 5 req / minute ---
+    if (waitlistLimiter) {
+      const ipHeader = req.headers.get("x-forwarded-for") ?? "";
+      const ip = ipHeader.split(",")[0].trim() || "unknown";
+
+      const { success } = await waitlistLimiter.limit(ip);
+
+      if (!success) {
+        return NextResponse.json(
+          { error: "Too many requests. Try again later." },
+          { status: 429 },
+        );
+      }
+    } else {
+      console.warn("[WAITLIST] Rate limiter not configured – no limit applied");
+    }
+
     const body = await req.json();
 
     const email = body?.email as string | undefined;
@@ -180,7 +197,7 @@ export async function POST(req: Request) {
 
     await Promise.all([
       sendNotificationEmail(email, userAgent, source),
-      sendWelcomeEmail(email), // UPDATED: no source argument
+      sendWelcomeEmail(email),
     ]);
 
     return NextResponse.json({ success: true });
