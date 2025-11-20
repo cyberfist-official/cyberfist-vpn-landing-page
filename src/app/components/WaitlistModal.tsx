@@ -1,122 +1,161 @@
 "use client";
 
-import { FormEvent, useState, ReactNode } from "react";
+import { useState, FormEvent } from "react";
 
 type WaitlistModalProps = {
-  children: ReactNode; // button label (e.g. "Join the Waitlist")
+  isOpen: boolean;
+  onClose: () => void;
+  /**
+   * Where this signup came from, e.g. "hero_button", "footer", "blog_post_x".
+   * This gets combined with UTM params server-side.
+   */
+  source?: string;
 };
 
-export default function WaitlistModal({ children }: WaitlistModalProps) {
-  const [open, setOpen] = useState(false);
+export default function WaitlistModal({
+  isOpen,
+  onClose,
+  source = "hero_button",
+}: WaitlistModalProps) {
   const [email, setEmail] = useState("");
-  const [submitted, setSubmitted] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">(
+    "idle",
+  );
+  const [errorMessage, setErrorMessage] = useState("");
 
-  async function handleSubmit(e: FormEvent) {
+  if (!isOpen) return null;
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setStatus("loading");
+    setErrorMessage("");
 
-    setIsSubmitting(true);
-    setError(null);
+    const formData = new FormData(e.currentTarget);
+    const hp = (formData.get("hp") as string) || "";
 
     try {
       const res = await fetch("/api/waitlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({
+          email,
+          source,
+          hp, // honeypot field – server drops if non-empty
+        }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || "Something went wrong. Please try again.");
+        setStatus("error");
+        setErrorMessage(
+          data?.error || "Something went wrong. Please try again.",
+        );
         return;
       }
 
-      setSubmitted(true);
+      setStatus("success");
       setEmail("");
     } catch (err) {
-      console.error(err);
-      setError("Something went wrong. Please try again.");
-    } finally {
-      setIsSubmitting(false);
+      console.error("[WAITLIST] Frontend error:", err);
+      setStatus("error");
+      setErrorMessage("Something went wrong. Please try again.");
     }
   }
 
-  function closeModal() {
-    setOpen(false);
-    setSubmitted(false);
+  function handleClose() {
+    setStatus("idle");
+    setErrorMessage("");
     setEmail("");
-    setError(null);
+    onClose();
   }
 
   return (
-    <>
-      {/* Trigger button */}
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="inline-flex items-center justify-center rounded-xl bg-accent-beige px-8 py-3 text-sm sm:text-base font-semibold text-dark-bg shadow-[0_18px_45px_rgba(0,0,0,0.55)] shadow-amber-900/30 transition hover:-translate-y-0.5 hover:shadow-[0_22px_55px_rgba(0,0,0,0.65)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-teal focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"
-      >
-        {children}
-      </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm">
+      <div className="relative w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 px-6 py-6 shadow-2xl">
+        {/* Close button */}
+        <button
+          onClick={handleClose}
+          className="absolute right-3 top-3 rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700"
+        >
+          ✕
+        </button>
 
-      {/* Modal */}
-      {open && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4">
-          <div className="w-full max-w-md rounded-3xl border border-emerald-500/15 bg-[#06181D] p-6 sm:p-8 shadow-2xl">
-            <h2 className="mb-2 text-2xl sm:text-3xl font-bold text-cream">
-              Join the Waitlist
+        {status === "success" ? (
+          <div className="space-y-3 text-center">
+            <h2 className="text-xl font-semibold text-slate-50">
+              You&apos;re on the list
             </h2>
-            <p className="mb-6 text-sm sm:text-base text-muted">
-              Be first to know when CyberFist goes live. No spam — ever.
+            <p className="text-sm text-slate-400">
+              We&apos;ll email you as soon as CyberFist VPN is ready for early
+              access.
             </p>
-
-            {submitted ? (
-              <p className="text-sm text-emerald-300">
-                Thanks — you’re on the list. We’ll email you as soon as we’re
-                ready.
-              </p>
-            ) : (
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <label className="block text-sm font-medium text-muted">
-                  Email address
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@email.com"
-                    className="mt-2 w-full rounded-xl border border-emerald-500/25 bg-[#031015] px-3 py-2 text-sm sm:text-base text-cream placeholder:text-slate-500 outline-none focus:border-accent-teal focus:ring-1 focus:ring-accent-teal"
-                  />
-                </label>
-
-                {error && (
-                  <p className="text-sm text-red-400">
-                    {error}
-                  </p>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="mt-2 inline-flex w-full items-center justify-center rounded-xl bg-accent-beige px-4 py-2.5 text-sm sm:text-base font-semibold text-dark-bg shadow-[0_18px_45px_rgba(0,0,0,0.55)] shadow-amber-900/30 transition hover:-translate-y-0.5 hover:shadow-[0_22px_55px_rgba(0,0,0,0.65)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-teal focus-visible:ring-offset-2 focus-visible:ring-offset-[#06181D] disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {isSubmitting ? "Joining..." : "Join the Waitlist"}
-                </button>
-              </form>
-            )}
-
             <button
-              type="button"
-              onClick={closeModal}
-              className="mt-5 w-full rounded-xl border border-slate-600/60 bg-transparent px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-50/5"
+              onClick={handleClose}
+              className="mt-2 w-full rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400"
             >
               Close
             </button>
           </div>
-        </div>
-      )}
-    </>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-50">
+                Join the CyberFist VPN waitlist
+              </h2>
+              <p className="mt-1 text-sm text-slate-400">
+                Enter your email to get early access when we launch.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label
+                htmlFor="waitlist-email"
+                className="block text-xs font-medium uppercase tracking-wide text-slate-400"
+              >
+                Email address
+              </label>
+              <input
+                id="waitlist-email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                placeholder="you@example.com"
+              />
+            </div>
+
+            {/* Honeypot field – visible to bots, invisible to humans */}
+            <div className="hidden">
+              <label htmlFor="hp">Leave this field empty</label>
+              <input
+                id="hp"
+                name="hp"
+                type="text"
+                autoComplete="off"
+                tabIndex={-1}
+              />
+            </div>
+
+            {status === "error" && (
+              <p className="text-sm text-rose-400">{errorMessage}</p>
+            )}
+
+            <button
+              type="submit"
+              disabled={status === "loading"}
+              className="flex w-full items-center justify-center rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {status === "loading" ? "Joining..." : "Join waitlist"}
+            </button>
+
+            <p className="text-center text-[11px] text-slate-500">
+              No spam. We&apos;ll only contact you about CyberFist VPN.
+            </p>
+          </form>
+        )}
+      </div>
+    </div>
   );
 }

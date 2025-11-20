@@ -5,7 +5,11 @@ import { Resend } from "resend";
 const sheets = google.sheets("v4");
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-async function addToWaitlist(email: string, userAgent: string, source: string) {
+async function addToWaitlist(
+  email: string,
+  userAgent: string,
+  source: string,
+) {
   const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
   const privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
   const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
@@ -30,7 +34,7 @@ async function addToWaitlist(email: string, userAgent: string, source: string) {
   await sheets.spreadsheets.values.append({
     auth,
     spreadsheetId,
-    range: "Sheet1!A:D", // change Sheet1 if you rename the tab
+    range: "Sheet1!A:D",
     valueInputOption: "USER_ENTERED",
     requestBody: {
       values: [[now, email, userAgent, source]],
@@ -38,17 +42,23 @@ async function addToWaitlist(email: string, userAgent: string, source: string) {
   });
 }
 
-async function sendNotificationEmail(email: string, userAgent: string, source: string) {
+async function sendNotificationEmail(
+  email: string,
+  userAgent: string,
+  source: string,
+) {
   const to = process.env.WAITLIST_NOTIFY_TO;
-  const from = process.env.WAITLIST_NOTIFY_FROM || "CyberFist Waitlist <no-reply@example.com>";
+  const from =
+    process.env.WAITLIST_NOTIFY_FROM ||
+    "CyberFist Waitlist <no-reply@example.com>";
 
   if (!process.env.RESEND_API_KEY) {
-    console.error("[WAITLIST] RESEND_API_KEY not set, skipping notification email");
+    console.error("[WAITLIST] RESEND_API_KEY not set, skipping notification");
     return;
   }
 
   if (!to) {
-    console.error("[WAITLIST] WAITLIST_NOTIFY_TO not set, skipping notification email");
+    console.error("[WAITLIST] WAITLIST_NOTIFY_TO not set, skipping notification");
     return;
   }
 
@@ -61,20 +71,90 @@ async function sendNotificationEmail(email: string, userAgent: string, source: s
         "New waitlist signup",
         "",
         `Email: ${email}`,
-        `Source: ${source || "unknown"}`,
+        `Source/UTM: ${source || "unknown"}`,
         `User-Agent: ${userAgent || "unknown"}`,
         `Time (ISO): ${new Date().toISOString()}`,
       ].join("\n"),
     });
   } catch (err) {
     console.error("[WAITLIST] Failed to send notification email:", err);
-    // Deliberately not throwing – signup should still succeed even if email fails.
+  }
+}
+
+async function sendWelcomeEmail(email: string, source: string) {
+  const from =
+    process.env.WAITLIST_NOTIFY_FROM ||
+    "CyberFist Waitlist <no-reply@example.com>";
+
+  if (!process.env.RESEND_API_KEY) {
+    console.error("[WAITLIST] RESEND_API_KEY not set, skipping welcome email");
+    return;
+  }
+
+  try {
+    await resend.emails.send({
+      from,
+      to: email,
+      subject: "You’re on the CyberFist VPN waitlist",
+      text: [
+        "Thanks for joining the CyberFist VPN waitlist.",
+        "",
+        "We’re building a fast, privacy-first VPN focused on real security, not marketing buzzwords.",
+        "You’ll be one of the first to know when we’re ready for beta access.",
+        "",
+        `Source: ${source || "unknown"}`,
+        "",
+        "— CyberFist",
+      ].join("\n"),
+    });
+  } catch (err) {
+    console.error("[WAITLIST] Failed to send welcome email:", err);
+  }
+}
+
+function buildSourceWithTracking(
+  rawSource: string | undefined,
+  referer: string | null,
+): string {
+  const baseSource = rawSource || referer || "direct";
+
+  if (!referer) return baseSource;
+
+  try {
+    const url = new URL(referer);
+    const params = url.searchParams;
+
+    const bits: string[] = [];
+
+    const utmSource = params.get("utm_source");
+    const utmMedium = params.get("utm_medium");
+    const utmCampaign = params.get("utm_campaign");
+
+    if (utmSource) bits.push(`utm_source=${utmSource}`);
+    if (utmMedium) bits.push(`utm_medium=${utmMedium}`);
+    if (utmCampaign) bits.push(`utm_campaign=${utmCampaign}`);
+
+    if (!bits.length) return baseSource;
+
+    return `${baseSource} | ${bits.join("&")}`;
+  } catch {
+    return baseSource;
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const { email } = await req.json();
+    const body = await req.json();
+
+    const email = body?.email as string | undefined;
+    const clientSource = typeof body?.source === "string" ? body.source : undefined;
+    const honeypot = typeof body?.hp === "string" ? body.hp : "";
+
+    // Honeypot: if bots fill this, pretend success and bail.
+    if (honeypot.trim().length > 0) {
+      console.warn("[WAITLIST] Honeypot triggered, dropping spam submission");
+      return NextResponse.json({ success: true });
+    }
 
     if (!email || typeof email !== "string") {
       return NextResponse.json(
@@ -92,13 +172,21 @@ export async function POST(req: Request) {
     }
 
     const userAgent = req.headers.get("user-agent") || "unknown";
-    const referer = req.headers.get("referer") || "direct";
+    const referer = req.headers.get("referer");
 
-    // 1. Store in Google Sheets
-    await addToWaitlist(email, userAgent, referer);
+    const source = buildSourceWithTracking(clientSource, referer);
 
-    // 2. Fire notification email to you
-    await sendNotificationEmail(email, userAgent, referer);
+    // TODO (optional real rate limiting): if you want proper IP-based
+    // rate limiting, we can plug in Upstash here. For now:
+    // - honeypot blocks dumb bots
+    // - email validation blocks junk
+
+    await addToWaitlist(email, userAgent, source);
+
+    await Promise.all([
+      sendNotificationEmail(email, userAgent, source),
+      sendWelcomeEmail(email, source),
+    ]);
 
     return NextResponse.json({ success: true });
   } catch (error) {

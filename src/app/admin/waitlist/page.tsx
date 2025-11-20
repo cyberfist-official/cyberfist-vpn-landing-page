@@ -37,7 +37,6 @@ async function getWaitlistEntries(): Promise<WaitlistEntry[]> {
 
   const rows = res.data.values || [];
 
-  // rows: [ [timestamp, email, userAgent, source], ... ]
   return rows.map((row) => ({
     timestamp: row[0] || "",
     email: row[1] || "",
@@ -46,16 +45,63 @@ async function getWaitlistEntries(): Promise<WaitlistEntry[]> {
   }));
 }
 
-export default async function WaitlistAdminPage() {
+export default async function WaitlistAdminPage({
+  searchParams,
+}: {
+  searchParams?: { q?: string };
+}) {
   const entries = await getWaitlistEntries();
+
+  const q = (searchParams?.q || "").toLowerCase().trim();
+
+  const filtered = q
+    ? entries.filter((e) => {
+        const haystack = [
+          e.timestamp,
+          e.email,
+          e.source,
+          e.userAgent,
+        ]
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(q);
+      })
+    : entries;
+
+  const shown = filtered.slice().reverse(); // newest first
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 p-8">
-      <div className="max-w-5xl mx-auto">
-        <h1 className="text-3xl font-semibold mb-4">CyberFist Waitlist</h1>
-        <p className="text-slate-400 mb-6">
-          Total signups: {entries.length}
-        </p>
+      <div className="max-w-5xl mx-auto space-y-6">
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-semibold">CyberFist Waitlist</h1>
+            <p className="text-slate-400 text-sm mt-1">
+              Total signups: {entries.length} · Showing: {shown.length}
+            </p>
+          </div>
+
+          <form
+            method="GET"
+            className="flex gap-2 items-center bg-slate-900/70 border border-slate-800 rounded-lg px-3 py-2"
+          >
+            <input
+              type="text"
+              name="q"
+              placeholder="Filter by email, source, UA..."
+              defaultValue={q}
+              className="bg-transparent outline-none text-sm text-slate-100 placeholder:text-slate-500"
+            />
+            {q && (
+              <a
+                href="/admin/waitlist"
+                className="text-xs text-slate-400 hover:text-slate-200"
+              >
+                Clear
+              </a>
+            )}
+          </form>
+        </header>
 
         <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/60">
           <table className="min-w-full text-sm">
@@ -68,7 +114,7 @@ export default async function WaitlistAdminPage() {
                   Email
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-slate-300">
-                  Source
+                  Source / UTM
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-slate-300">
                   User Agent
@@ -76,38 +122,35 @@ export default async function WaitlistAdminPage() {
               </tr>
             </thead>
             <tbody>
-              {entries.length === 0 ? (
+              {shown.length === 0 ? (
                 <tr>
                   <td
                     colSpan={4}
                     className="px-4 py-6 text-center text-slate-500"
                   >
-                    No entries yet.
+                    No entries match this filter.
                   </td>
                 </tr>
               ) : (
-                entries
-                  .slice() // shallow copy
-                  .reverse() // show newest first
-                  .map((entry, idx) => (
-                    <tr
-                      key={idx}
-                      className="border-t border-slate-800 hover:bg-slate-900/60"
-                    >
-                      <td className="px-4 py-3 align-top text-slate-300">
-                        {entry.timestamp}
-                      </td>
-                      <td className="px-4 py-3 align-top text-slate-100">
-                        {entry.email}
-                      </td>
-                      <td className="px-4 py-3 align-top text-slate-300">
-                        {entry.source || "direct"}
-                      </td>
-                      <td className="px-4 py-3 align-top text-slate-500 max-w-xl break-words">
-                        {entry.userAgent}
-                      </td>
-                    </tr>
-                  ))
+                shown.map((entry, idx) => (
+                  <tr
+                    key={idx}
+                    className="border-t border-slate-800 hover:bg-slate-900/60"
+                  >
+                    <td className="px-4 py-3 align-top text-slate-300">
+                      {entry.timestamp}
+                    </td>
+                    <td className="px-4 py-3 align-top text-slate-100">
+                      {entry.email}
+                    </td>
+                    <td className="px-4 py-3 align-top text-slate-300 max-w-xs break-words">
+                      {entry.source || "direct"}
+                    </td>
+                    <td className="px-4 py-3 align-top text-slate-500 max-w-xl break-words">
+                      {entry.userAgent}
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
