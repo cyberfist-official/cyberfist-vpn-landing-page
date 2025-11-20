@@ -81,7 +81,8 @@ async function sendNotificationEmail(
   }
 }
 
-async function sendWelcomeEmail(email: string, source: string) {
+// UPDATED: no source in the email body, and no `source` argument
+async function sendWelcomeEmail(email: string) {
   const from =
     process.env.WAITLIST_NOTIFY_FROM ||
     "CyberFist Waitlist <no-reply@example.com>";
@@ -101,8 +102,6 @@ async function sendWelcomeEmail(email: string, source: string) {
         "",
         "We’re building a fast, privacy-first VPN focused on real security, not marketing buzzwords.",
         "You’ll be one of the first to know when we’re ready for beta access.",
-        "",
-        `Source: ${source || "unknown"}`,
         "",
         "— CyberFist",
       ].join("\n"),
@@ -147,7 +146,8 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     const email = body?.email as string | undefined;
-    const clientSource = typeof body?.source === "string" ? body.source : undefined;
+    const clientSource =
+      typeof body?.source === "string" ? body.source : undefined;
     const honeypot = typeof body?.hp === "string" ? body.hp : "";
 
     // Honeypot: if bots fill this, pretend success and bail.
@@ -176,16 +176,11 @@ export async function POST(req: Request) {
 
     const source = buildSourceWithTracking(clientSource, referer);
 
-    // TODO (optional real rate limiting): if you want proper IP-based
-    // rate limiting, we can plug in Upstash here. For now:
-    // - honeypot blocks dumb bots
-    // - email validation blocks junk
-
     await addToWaitlist(email, userAgent, source);
 
     await Promise.all([
       sendNotificationEmail(email, userAgent, source),
-      sendWelcomeEmail(email, source),
+      sendWelcomeEmail(email), // UPDATED: no source argument
     ]);
 
     return NextResponse.json({ success: true });
